@@ -1,0 +1,17 @@
+# Dependency directories
+node_modules/
+
+# Credentials
+api-*.json
+*api.json
+
+# dotenv environment variables file
+.env
+.env.test
+
+# Misc
+.DS_Store
+.vscode-test
+
+# Local Netlify folder
+.netlify

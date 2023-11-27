@@ -1,0 +1,3 @@
+[build]
+  functions = "functions"  #  Folder where serverless functions are located (a Node API server, in this case). Netlify-lambda reads this.
+  publish = "public"       #  Folder containing any frontend to display. If app works only as an API to be consumed externally, this folder might contain an empty index.html file.
