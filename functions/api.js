@@ -10,6 +10,9 @@ if (!process.env.GOOGLE_SPREADSHEET_ID_FROM_URL)
 
 const { GoogleSpreadsheet } = require('google-spreadsheet')
 
+const bcrypt = require('bcryptjs')
+const jwt = require('jsonwebtoken')
+
 // All http methods are evaluated through this unique async handler function
 exports.handler = async (event, context) => {
   const doc = new GoogleSpreadsheet(process.env.GOOGLE_SPREADSHEET_ID_FROM_URL)
@@ -24,6 +27,20 @@ exports.handler = async (event, context) => {
 
   const path = event.path.replace('/.netlify/functions/api/', '')
   const pathSegments = path.split('/')
+
+  // Promise that returns a JWT, based on userId:
+  const generateJWT = ( userId ) => {
+    return new Promise( (resolve, reject) => {
+      const payload = { userId }
+      jwt.sign( payload, process.env.SECRET_JWT_SEED, { expiresIn: '24h' }, (err, token) => {
+        if (err) {
+          console.log(err)
+          reject('Token has not been generated')
+        }
+        resolve( token )
+      })
+    })
+  }
   
   try {
 
@@ -151,6 +168,42 @@ exports.handler = async (event, context) => {
                 })
               }
             }
+
+            if (pathSegments.length === 6) {
+              const sheetNum = parseInt(pathSegments[1])
+              const columnName = pathSegments[2].toString().replace(/%20/g, ' ').toLowerCase().trim()
+              const targetValue = pathSegments[3].toString().replace(/%20/g, ' ').toLowerCase().trim()
+              const pass = pathSegments[5].toString()
+
+              const rows = await doc.sheetsByIndex[sheetNum].getRows()
+              const rowId = await findRowByColumnAndValuePair(sheetNum, rows, columnName, targetValue)
+              const srow = rowId === -1 ? {} : serializeRow(sheetNum, rows[rowId])
+
+              const passwordMatch = bcrypt.compareSync(pass, srow.password)
+
+              const uid = srow.id
+              
+              // JWT creation
+              const token = await generateJWT( uid )
+
+              return {
+                statusCode: 200,
+                headers: {
+                  'Access-Control-Allow-Origin': '*',
+                  'Access-Control-Allow-Headers': 'Authorization, X-API-KEY, Origin, X-Requested-With, Content-Type, Accept, Access-Control-Allow-Request-Method',
+                  'Access-Control-Allow-Methods': 'GET, POST, PATCH, OPTIONS, PUT, DELETE',
+                  'Allow': 'GET, POST, PATCH, OPTIONS, PUT, DELETE'
+                },
+                body: JSON.stringify({
+                  zeroIndexRowNumber: rowId,                                                    // int
+                  rowData: srow,                                                                // object
+                  passwordMatch: passwordMatch,                                                 // boolean
+                  token,                                                                        // JSON Web Token / string
+                  providedColumnName: columnName,                                               // string
+                  providedValue: targetValue                                                    // string
+                })
+              }
+            }
               
           default:
             return {
@@ -187,6 +240,13 @@ exports.handler = async (event, context) => {
           const rowsDataToArray = serializedRows.map(obj => Object.entries(obj))
           const idLastRow = rowsDataToArray.length > 0 ? parseInt(rowsDataToArray[rows.length - 1][0][1]) : 0
           let stringData = (event.body).toString()
+          let salt
+          if (stringData.includes('password":')) {
+            let bodyPassCheck = JSON.parse(event.body)
+            salt = bcrypt.genSaltSync()
+            bodyPassCheck.password = bcrypt.hashSync( bodyPassCheck.password, salt )
+            stringData = JSON.stringify(bodyPassCheck).toString()
+          }
           stringData = stringData.slice(1)
           stringData = '{"id":"'.concat((idLastRow + 1).toString()).concat('",').concat(stringData)
           const data = JSON.parse(stringData)                                                       // parse the string body into a useable JS object
